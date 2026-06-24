@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hospitality_Data_analyze_LLM-Gulzar</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <style>
+        #mindmap-canvas {
+            width: 100%;
+            height: 500px;
+            background-color: #f8fafc;
+        }
+        .markdown-body ul { list-style-type: disc; padding-left: 1.25rem; }
+        .pdf-page-canvas {
+            max-width: 100%;
+            margin-bottom: 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            background-color: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 0.375rem;
+        }
+        /* Custom lightweight markdown utility rendering */
+        .notebook-render h1 { font-size: 1.15rem; font-weight: 700; margin-bottom: 0.5rem; color: #1e3a8a; }
+        .notebook-render h2 { font-size: 1.05rem; font-weight: 600; margin-bottom: 0.4rem; color: #2563eb; }
+        .notebook-render ul { list-style-type: disc; padding-left: 1.25rem; margin-bottom: 0.5rem; }
+        .notebook-render table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; font-size: 11px; }
+        .notebook-render th { background-color: #f1f5f9; padding: 0.4rem; text-align: left; border: 1px solid #cbd5e1; color: #334155; }
+        .notebook-render td { padding: 0.4rem; border: 1px solid #cbd5e1; }
+        .notebook-render tr:nth-child(even) { background-color: #f8fafc; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 h-screen flex flex-col font-sans overflow-hidden">
+
+    <header class="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shrink-0 shadow-xs">
+        <div class="flex items-center space-x-3">
+            <div class="bg-blue-600 text-white px-2.5 py-1 rounded-md font-bold tracking-wider text-xs">HospitalityLLM</div>
+            <h1 class="text-md font-semibold text-slate-800">Hospitality_Data_analyze_LLM</h1>
+        </div>
+        
+        <div class="flex items-center space-x-3">
+            <div class="relative flex items-center">
+                <input type="password" id="apiKeyInput" placeholder="Enter Gemini API Key" 
+                       class="w-64 px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 pr-8">
+                <span id="statusIndicator" class="absolute right-3 w-2.5 h-2.5 rounded-full bg-red-500 transition-colors duration-300" title="Disconnected"></span>
+            </div>
+            <button onclick="connectApiKey()" class="bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 text-xs font-medium rounded-md transition cursor-pointer">
+                Connect
+            </button>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden w-full">
+        
+        <aside class="w-80 bg-white border-r border-slate-200 flex flex-col p-4 shrink-0 overflow-y-auto">
+            <h2 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3">Context Sources</h2>
+            
+            <div class="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:border-blue-500 transition cursor-pointer relative mb-4 bg-slate-50">
+                <input type="file" id="fileUploader" accept=".pdf" class="absolute inset-0 opacity-0 cursor-pointer" onchange="processIncomingFiles(event)">
+                <p class="text-xs font-medium text-slate-700">Drop P&L PDF or click to upload</p>
+                <p class="text-[10px] text-slate-400 mt-1">Supports Statement PDFs Only</p>
+            </div>
+
+            <div class="mb-4">
+                <h3 class="text-xs font-semibold text-slate-500 mb-2">Active Document Inventory</h3>
+                <ul id="fileList" class="space-y-2 text-xs">
+                    <li class="text-slate-400 italic py-2 text-center">No active statement uploaded</li>
+                </ul>
+            </div>
+
+            <div class="mt-auto pt-4 border-t border-slate-100 space-y-2">
+                <button onclick="requestAILandscapeMindmap()" class="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium py-2 px-3 text-xs rounded-md transition flex items-center justify-center space-x-1 cursor-pointer">
+                    <span>⚡ Generate Mindmap</span>
+                </button>
+            </div>
+        </aside>
+
+        <main class="flex-1 bg-slate-50 flex flex-col overflow-y-auto p-6">
+            <div class="flex space-x-6 border-b border-slate-200 mb-4 pb-1 shrink-0">
+                <button id="tab-viewer" onclick="toggleView('viewer')" class="text-xs font-semibold border-b-2 border-blue-600 pb-2 text-blue-600 transition-all cursor-pointer">Analysis Worksheet</button>
+                <button id="tab-mindmap" onclick="toggleView('mindmap')" class="text-xs font-medium text-slate-400 pb-2 hover:text-slate-600 transition-all cursor-pointer">Interactive Mindmap</button>
+                <button id="tab-presentation" onclick="toggleView('presentation')" class="text-xs font-medium text-slate-400 pb-2 hover:text-slate-600 transition-all cursor-pointer">Executive Presentation Deck</button>
+            </div>
+
+            <div id="view-viewer" class="flex-1 flex space-x-4 min-h-0 overflow-hidden">
+                
+                <div class="w-1/2 bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex flex-col overflow-hidden">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">P&L Document Viewer Workspace</h3>
+                    <div id="pdfCanvasViewerContainer" class="flex-1 overflow-y-auto p-2 bg-slate-100 rounded-lg flex flex-col items-center">
+                        <div class="text-slate-400 italic text-center my-auto text-xs p-4">
+                            No statement active. Upload a financial PDF file to initialize the canvas layer.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="w-1/2 bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex flex-col overflow-hidden">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Dynamic Output Feed</h3>
+                    <p class="text-[11px] text-slate-400 mb-2">Chronological data arrays and table formats display down below.</p>
+                    <div id="viewerContent" class="flex-1 overflow-y-auto pr-1 space-y-4 text-xs divide-y divide-slate-100">
+                        <p class="text-slate-400 italic py-4">Awaiting chatbot analysis query processing requests...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="view-mindmap" class="hidden space-y-4 flex-1 h-full flex flex-col">
+                <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col flex-1">
+                    <div class="flex justify-between items-center mb-2">
+                        <div>
+                            <h3 class="text-sm font-semibold text-slate-800">Interactive Document Node Map</h3>
+                            <p class="text-[11px] text-slate-400">Zoom or pan to inspect conceptual structural nodes and summaries.</p>
+                        </div>
+                        <button onclick="resetMindmapLayout()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1 text-[10px] rounded font-medium cursor-pointer">Reset Fit</button>
+                    </div>
+                    <div id="mindmap-canvas" class="rounded-lg border border-slate-200 flex-1"></div>
+                </div>
+            </div>
+
+            <div id="view-presentation" class="hidden space-y-4 flex-1">
+                <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-xs">
+                    <h3 class="text-sm font-semibold text-slate-800">Executive Slide Presentation Workspace</h3>
+                    <p class="text-xs text-slate-400 mb-4">Dynamically updated via targeted conversational chat commands.</p>
+                    
+                    <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-2 items-start">
+                        <div class="border border-slate-200 rounded-xl p-4 bg-slate-50 min-h-[320px] flex items-center justify-center relative">
+                            <canvas id="deckChartCanvas" class="w-full h-full max-h-[300px]"></canvas>
+                        </div>
+                        <div class="bg-white p-5 border border-slate-200 rounded-xl min-h-[320px]">
+                            <h4 class="text-xs font-bold uppercase text-slate-400 tracking-wider mb-2">Slide Summary Commentary</h4>
+                            <div id="deckCommentaryBox" class="text-xs text-slate-600 leading-relaxed space-y-2 markdown-body">
+                                <p class="italic text-slate-400">Ask the chatbot to isolate segments or charts to populate presentation layouts.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <aside class="w-96 bg-white border-l border-slate-200 flex flex-col shrink-0">
+            <div class="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+                <span class="text-xs font-bold text-slate-600 tracking-wider uppercase">Assistant Terminal</span>
+                <span class="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">gemini-2.5-flash</span>
+            </div>
+
+            <div id="chatBoxMessages" class="flex-1 overflow-y-auto p-4 space-y-3 text-xs">
+                <div class="bg-slate-100 p-3 rounded-lg text-slate-700 max-w-[85%] leading-relaxed">
+                    Welcome. Clear the top input box, paste **only** your actual Gemini API key, and hit Connect. Then upload your P&L statement PDF to begin deep visual and structured analyses.
+                </div>
+            </div>
+
+            <div class="p-3 border-t border-slate-200 bg-white">
+                <div class="flex space-x-2 items-end">
+                    <textarea id="promptInputField" rows="2" placeholder="e.g., Analyze the P&L variance vs budget targets..." 
+                              class="flex-1 px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-sans"></textarea>
+                    <button onclick="dispatchAssistantPrompt()" class="bg-blue-600 hover:bg-blue-700 text-white p-2.5 rounded-lg transition shrink-0 cursor-pointer h-9 flex items-center justify-center">
+                        <svg class="h-4 w-4 transform rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+                    </button>
+                </div>
+                <div class="text-[10px] text-slate-400 mt-1.5 text-center">
+                    To trigger presentations, include: <code class="bg-slate-100 px-1 rounded text-slate-600">"Render Chart JSON"</code>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+        let runtimeState = {
+            apiKey: "",
+            loadedDocuments: [], 
+            visNetworkObj: null,
+            chartJsObj: null
+        };
+
+        function toggleView(targetView) {
+            ['viewer', 'mindmap', 'presentation'].forEach(view => {
+                document.getElementById(`view-${view}`).classList.add('hidden');
+                document.getElementById(`tab-${view}`).className = "text-xs font-medium text-slate-400 pb-2 hover:text-slate-600 transition-all cursor-pointer";
+            });
+            if(targetView === 'viewer') {
+                document.getElementById('view-viewer').style.display = 'flex';
+            } else {
+                document.getElementById('view-viewer').style.display = 'none';
+            }
+            document.getElementById(`tab-${targetView}`).className = "text-xs font-semibold border-b-2 border-blue-600 pb-2 text-blue-600 transition-all cursor-pointer";
+            if (targetView === 'mindmap') resetMindmapLayout();
+        }
+
+        function connectApiKey() {
+            // Encode key to ensure no raw parameter injection risks from stray copied strings
+            const keyVal = encodeURIComponent(document.getElementById('apiKeyInput').value.trim());
+            if(!keyVal) { alert("Please provide a valid Gemini API Key string."); return; }
+            runtimeState.apiKey = keyVal;
+            const marker = document.getElementById('statusIndicator');
+            marker.className = "absolute right-3 w-2.5 h-2.5 rounded-full bg-emerald-500";
+            marker.title = "Connected Securely";
+            postLogNotice("API credentials updated and verification structural handshake accepted.");
+        }
+
+        function parseCleanNotebookMarkdown(text) {
+            let html = text
+                .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                .replace(/^### (.*$)/gim, '<h2>$1</h2>')
+                .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+                .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/^\s*-\s+(.*)$/gim, '<li>$1</li>')
+                .replace(/^\s*\*\s+(.*)$/gim, '<li>$1</li>');
+
+            html = html.replace(/(<li>.*<\/li>)/gms, '<ul>$1<\/ul>');
+            
+            if(html.includes('|')) {
+                const lines = html.split('\n');
+                let insideTable = false;
+                let tableHtml = '<table>';
+                for(let i=0; i<lines.length; i++) {
+                    if(lines[i].trim().startsWith('|')) {
+                        if(!insideTable) { insideTable = true; }
+                        const cells = lines[i].split('|').map(c => c.trim()).filter(c => c !== '');
+                        if(cells.length > 0 && !lines[i].includes('---')) {
+                            tableHtml += '<tr>' + cells.map(c => `<td>${c}</td>`).join('') + '</tr>';
+                        }
+                    } else if(insideTable) {
+                        insideTable = false;
+                        tableHtml += '</table>';
+                        lines[i] = tableHtml + lines[i];
+                        tableHtml = '<table>';
+                    }
+                }
+                html = lines.join('\n');
+            }
+            return html.replace(/\n/g, '<br>');
+        }
+
+        function processIncomingFiles(event) {
+            const fileArray = event.target.files;
+            const inventoryUi = document.getElementById('fileList');
+            const pdfViewerBox = document.getElementById('pdfCanvasViewerContainer');
+            
+            inventoryUi.innerHTML = '';
+            pdfViewerBox.innerHTML = '';
+            runtimeState.loadedDocuments = [];
+
+            Array.from(fileArray).forEach(file => {
+                if (!file.name.endsWith('.pdf')) { alert("Application accepts PDF formats only."); return; }
+                
+                const streamReader = new FileReader();
+                streamReader.onload = async function(e) {
+                    const bufferData = new Uint8Array(e.target.result);
+                    try {
+                        const loadingTask = pdfjsLib.getDocument({data: bufferData});
+                        const pdf = await loadingTask.promise;
+                        let extractedText = "";
+                        let maxPages = Math.min(pdf.numPages, 15);
+                        
+                        for (let i = 1; i <= maxPages; i++) {
+                            const page = await pdf.getPage(i);
+                            const textContent = await page.getTextContent();
+                            const pageItems = textContent.items.map(item => item.str).join(" ");
+                            extractedText += `--- PAGE ${i} ---\n` + pageItems + "\n";
+
+                            const nativeViewport = page.getViewport({scale: 1.1});
+                            const targetCanvas = document.createElement('canvas');
+                            targetCanvas.className = "pdf-page-canvas";
+                            targetCanvas.height = nativeViewport.height;
+                            targetCanvas.width = nativeViewport.width;
+                            pdfViewerBox.appendChild(targetCanvas);
+
+                            const context = targetCanvas.getContext('2d');
+                            await page.render({canvasContext: context, viewport: nativeViewport}).promise;
+                        }
+                        
+                        runtimeState.loadedDocuments.push({
+                            name: file.name,
+                            payload: extractedText,
+                            columns: ["Extracted PDF Layout Text"],
+                            metrics: { rowsCount: pdf.numPages, type: 'PDF Document' }
+                        });
+
+                        const domNode = document.createElement('li');
+                        domNode.className = "bg-slate-50 border border-slate-200 p-2.5 rounded-lg text-slate-700 flex flex-col space-y-1";
+                        domNode.innerHTML = `
+                            <div class="font-medium text-xs truncate flex items-center space-x-1">
+                                <span>📕</span> <span class="truncate">${file.name}</span>
+                            </div>
+                            <div class="text-[10px] text-slate-400 font-mono">Type: PDF Statement | Pages: ${pdf.numPages}</div>
+                        `;
+                        inventoryUi.appendChild(domNode);
+                    } catch (pdfErr) {
+                        console.error(pdfErr);
+                        pdfViewerBox.innerHTML = `<div class="text-red-500 p-4 text-center">Failed to cleanly render PDF file matrix lines.</div>`;
+                    }
+                };
+                streamReader.readAsArrayBuffer(file);
+            });
+        }
+
+        async function dispatchAssistantPrompt() {
+            const inputField = document.getElementById('promptInputField');
+            const clearPrompt = inputField.value.trim();
+            if(!clearPrompt) return;
+
+            if(!runtimeState.apiKey) { alert("Connect your Gemini API Key before execution."); return; }
+
+            appendChatBubble(clearPrompt, 'user');
+            inputField.value = '';
+
+            let payloadContextInstructions = `You are an elite hospitality financial controller and business intelligence agent operating on the gemini-2.5-flash framework.\n`;
+            if(runtimeState.loadedDocuments.length > 0) {
+                payloadContextInstructions += "Analyzable Structured Context Inventories:\n";
+                runtimeState.loadedDocuments.forEach(doc => {
+                    payloadContextInstructions += `\n[Context Document Source Name: ${doc.name}] [Type: ${doc.metrics.type}]\n[Content Data Payload:\n${doc.payload.substring(0, 25000)}\n`;
+                });
+            }
+            
+            payloadContextInstructions += `\nCRITICAL OUTPUT REQUIREMENT FOR CHARTS/SLIDES:\n`;
+            payloadContextInstructions += `If the user explicitly asks to render, plot, or create a chart or graph, look over the data, determine the correct numbers, and you MUST append a raw JSON block at the very end of your response exactly enclosed by the unique tags: ===CHART_JSON_START=== and ===CHART_JSON_END===.\n`;
+            payloadContextInstructions += `The structure of this enclosed JSON block must be exactly as follows:\n`;
+            payloadContextInstructions += `{\n  "chartType": "bar" or "line" or "pie",\n  "labels": ["Label1", "Label2", ...],\n  "datasetLabel": "Title of the Metric",\n  "data": [100, 200, ...],\n  "commentary": "HTML formatted bullet summary items to load into the slide display window."\n}\n`;
+            payloadContextInstructions += `User Directive Request: ${clearPrompt}`;
+
+            try {
+                const requestRoute = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${runtimeState.apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: payloadContextInstructions }] }] })
+                });
+
+                const structuralResult = await requestRoute.json();
+                
+                if(structuralResult.error) {
+                    appendChatBubble(`API Execution Error: ${structuralResult.error.message}`, 'model');
+                    return;
+                }
+                
+                const plainResponseText = structuralResult.candidates[0].content.parts[0].text;
+                
+                appendChatBubble(plainResponseText, 'model');
+                pushToViewerSheet(clearPrompt, plainResponseText);
+
+                if(plainResponseText.includes("===CHART_JSON_START===")) {
+                    const structuralJsonSegment = plainResponseText.split("===CHART_JSON_START===")[1].split("===CHART_JSON_END===")[0].trim();
+                    const parsedConfiguration = JSON.parse(structuralJsonSegment);
+                    renderPresentationSlideDeck(parsedConfiguration);
+                }
+            } catch(ex) {
+                appendChatBubble("Error communicating with Gemini endpoint. Please check your credentials or network connections.", 'model');
+                console.error(ex);
+            }
+        }
+
+        function renderPresentationSlideDeck(config) {
+            toggleView('presentation');
+            const targetCanvasContext = document.getElementById('deckChartCanvas').getContext('2d');
+            
+            if(runtimeState.chartJsObj) runtimeState.chartJsObj.destroy();
+
+            runtimeState.chartJsObj = new Chart(targetCanvasContext, {
+                type: config.chartType || 'bar',
+                data: {
+                    labels: config.labels,
+                    datasets: [{
+                        label: config.datasetLabel || 'Performance Values',
+                        data: config.data,
+                        backgroundColor: 'rgba(37, 99, 235, 0.75)',
+                        borderColor: 'rgba(29, 78, 216, 1)',
+                        borderWidth: 1.5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: true, labels: { boxWidth: 12, font: { size: 10 } } } }
+                }
+            });
+
+            document.getElementById('deckCommentaryBox').innerHTML = config.commentary || "<p class='italic'>No specialized bullet metrics appended.</p>";
+        }
+
+        async function requestAILandscapeMindmap() {
+            if(runtimeState.loadedDocuments.length === 0) { alert("Please upload a functional PDF file first."); return; }
+            if(!runtimeState.apiKey) { alert("Connect an operational API key."); return; }
+
+            toggleView('mindmap');
+            postLogNotice("Processing context metrics maps with gemini-2.5-flash...");
+
+            let mindmapPrompt = `Analyze the data structures, themes, or sheets of the following documents and construct an enterprise knowledge mindmap JSON structure detailing primary metric relationships, data dependencies, and key summary findings.`;
+            runtimeState.loadedDocuments.forEach(d => { mindmapPrompt += `\nFile: ${d.name} (Type: ${d.metrics.type})\nSchema/Content Preview: ${d.payload.substring(0, 10000)}`; });
+            
+            mindmapPrompt += `\nReturn ONLY a valid structured JSON block wrapped exactly inside ===MINDMAP_JSON_START=== and ===MINDMAP_JSON_END=== containing the following properties:\n`;
+            mindmapPrompt += `{\n  "nodes": [{ "id": 1, "label": "Label text", "title": "Brief description" }, ...],\n  "edges": [{ "from": 1, "to": 2 }, ...]\n}`;
+
+            try {
+                const callRoute = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${runtimeState.apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: mindmapPrompt }] }] })
+                });
+
+                const rawRes = await callRoute.json();
+                const txt = rawRes.candidates[0].content.parts[0].text;
+                
+                if(txt.includes("===MINDMAP_JSON_START===")) {
+                    const parsedJsonStr = txt.split("===MINDMAP_JSON_START===")[1].split("===MINDMAP_JSON_END===")[0].trim();
+                    const graphPayload = JSON.parse(parsedJsonStr);
+                    executeCanvasRender(graphPayload);
+                }
+            } catch(e) {
+                alert("Failed to safely establish AI Mindmap nodes configuration parsing.");
+                console.error(e);
+            }
+        }
+
+        function executeCanvasRender(graphData) {
+            const container = document.getElementById('mindmap-canvas');
+            const data = {
+                nodes: new vis.DataSet(graphData.nodes),
+                edges: new vis.DataSet(graphData.edges)
+            };
+            const options = {
+                nodes: {
+                    shape: 'box',
+                    margin: 12,
+                    color: { background: '#f0fdf4', border: '#22c55e', hover: { background: '#dcfce7', border: '#16a34a' } },
+                    font: { size: 11, color: '#166534', face: 'ui-sans-serif' },
+                    borderWidth: 1.5
+                },
+                edges: { color: '#bbf7d0', arrows: 'to', width: 1.5 },
+                interaction: { zoomView: true, hover: true, tooltipDelay: 100 }
+            };
+            runtimeState.visNetworkObj = new vis.Network(container, data, options);
+            postLogNotice("Mindmap generated dynamically from document analysis metrics.");
+        }
+
+        function resetMindmapLayout() {
+            if(runtimeState.visNetworkObj) runtimeState.visNetworkObj.fit();
+        }
+
+        function appendChatBubble(text, speaker) {
+            const container = document.getElementById('chatBoxMessages');
+            const element = document.createElement('div');
+            
+            let sanitText = text.replace(/===CHART_JSON_START===[\s\S]*===CHART_JSON_END===/g, "\n*[Presentation Element Loaded to Deck Panel]*");
+            
+            if(speaker === 'user') {
+                element.className = "bg-blue-600 text-white p-2.5 rounded-xl text-xs max-w-[85%] ml-auto shadow-xs";
+                element.innerText = sanitText;
+            } else {
+                element.className = "bg-slate-100 text-slate-800 p-2.5 rounded-xl text-xs max-w-[85%] mr-auto notebook-render border border-slate-200 leading-relaxed";
+                element.innerHTML = parseCleanNotebookMarkdown(sanitText);
+            }
+            container.appendChild(element);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function pushToViewerSheet(q, a) {
+            const viewFeed = document.getElementById('viewerContent');
+            if (viewFeed.querySelector('.italic')) viewFeed.innerHTML = '';
+
+            let structuralSnippet = a.replace(/===CHART_JSON_START===[\s\S]*===CHART_JSON_END===/g, "");
+
+            const card = document.createElement('div');
+            card.className = "pt-4 first:pt-0 space-y-1 notebook-render";
+            card.innerHTML = `
+                <div class="text-xs font-bold text-blue-600">Prompt Log: "${q}"</div>
+                <div class="text-xs text-slate-700 leading-relaxed">${parseCleanNotebookMarkdown(structuralSnippet)}</div>
+            `;
+            viewFeed.prepend(card);
+        }
+
+        function postLogNotice(text) {
+            const box = document.getElementById('chatBoxMessages');
+            const marker = document.createElement('div');
+            marker.className = "text-[10px] text-center text-slate-400 font-mono tracking-wide my-1 bg-slate-50 border border-slate-200/60 py-1 rounded";
+            marker.innerText = `⚙️ System: ${text}`;
+            box.appendChild(marker);
+            box.scrollTop = box.scrollHeight;
+        }
+    </script>
+</body>
+</html>
